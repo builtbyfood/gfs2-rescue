@@ -1,0 +1,103 @@
+<style nonce="{{nonce}}">
+  /* Light theme */
+  #gr-root { --gr-bg:#f4f6f8; --gr-card:#ffffff; --gr-card2:#f8f9fb; --gr-border:#d0d7de; --gr-text:#1f2328; --gr-muted:#57606a;
+    --gr-accent:#01A982; --gr-accent-dark:#00775c; --gr-sel:#e3f4ee; --gr-hover:#f0f3f6; --gr-code:#eef1f4; --gr-code-text:#1f2328;
+    --gr-warn:#7a4a00; --gr-warn-bg:#fff4e0; --gr-bad:#b3261e; --gr-bad-bg:#fdecea; --gr-ok:#00664f; --gr-ok-bg:#e3f4ee;
+    font-family:-apple-system,"Segoe UI",sans-serif; font-size:12px; color:var(--gr-text) !important; background:var(--gr-bg) !important; padding:12px; min-height:420px; border-radius:4px; }
+  /* Dark theme: darker than the Morpheus surface so the tab reads as one panel */
+  #gr-root.gr-dark { --gr-bg:#0b0e13; --gr-card:#12161d; --gr-card2:#161b24; --gr-border:#262e3b; --gr-text:#e8edf4; --gr-muted:#9aa6b6;
+    --gr-accent:#01A982; --gr-accent-dark:#3fd3ac; --gr-sel:#0f2a23; --gr-hover:#18202b; --gr-code:#070a0e; --gr-code-text:#dfe6ef;
+    --gr-warn:#f0c674; --gr-warn-bg:#2d2311; --gr-bad:#ff8c8c; --gr-bad-bg:#2e1416; --gr-ok:#5be0bd; --gr-ok-bg:#0f2a23; }
+  #gr-root * { box-sizing:border-box; }
+  #gr-root, #gr-root td, #gr-root th, #gr-root label, #gr-root summary, #gr-root div, #gr-root span, #gr-root b, #gr-root h3 { color:inherit; }
+  #gr-root .gr-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+  #gr-root .gr-head h3 { margin:0; font-size:15px; font-weight:700; color:var(--gr-text) !important; }
+  #gr-root .gr-clusterbox { display:flex; gap:14px; flex-wrap:wrap; align-items:center; padding:8px 10px; margin-bottom:10px;
+    background:var(--gr-card) !important; border:1px solid var(--gr-border); border-left:4px solid var(--gr-accent); border-radius:4px; }
+  #gr-root .gr-clusterbox .gr-k { color:var(--gr-muted) !important; font-size:10px; text-transform:uppercase; letter-spacing:.05em; display:block; }
+  #gr-root .gr-clusterbox .gr-v { color:var(--gr-text) !important; font-size:13px; font-weight:600; }
+  #gr-root .gr-muted, #gr-root .gr-why { color:var(--gr-muted) !important; }
+  #gr-root .gr-why { font-size:11px; margin:2px 0 0 0; overflow-wrap:anywhere; word-break:break-word; }
+  #gr-root code { background:var(--gr-code) !important; color:var(--gr-code-text) !important; padding:1px 5px; border-radius:3px; font-size:11px; word-break:break-all; border:0; }
+  #gr-root table { width:100%; border-collapse:collapse; background:transparent !important; }
+  #gr-root th { text-align:left; font-size:10px; text-transform:uppercase; color:var(--gr-muted) !important; padding:5px 8px; border-bottom:2px solid var(--gr-border); white-space:nowrap; background:transparent !important; }
+  #gr-root td { padding:6px 8px; border-bottom:1px solid var(--gr-border); vertical-align:top; color:var(--gr-text) !important; background:transparent !important; }
+  /* tree */
+  #gr-root details.gr-node { background:var(--gr-card) !important; border:1px solid var(--gr-border); border-radius:4px; margin-bottom:10px; }
+  #gr-root details.gr-node > summary { padding:8px 10px; font-weight:600; cursor:pointer; list-style:none; display:flex; gap:8px; align-items:center; color:var(--gr-text) !important; }
+  #gr-root details > summary::-webkit-details-marker { display:none; }
+  #gr-root details > summary::before { content:'\25B8'; display:inline-block; width:12px; color:var(--gr-muted); transition:transform .12s; }
+  #gr-root details[open] > summary::before { transform:rotate(90deg); }
+  #gr-root details.gr-node[open] > summary { border-bottom:1px solid var(--gr-border); }
+  #gr-root .gr-node-b { padding:8px 10px; }
+  #gr-root details.gr-vol { border:1px solid var(--gr-border); border-radius:4px; margin:6px 0; background:var(--gr-card2) !important; }
+  #gr-root details.gr-vol > summary { padding:7px 10px; cursor:pointer; list-style:none; display:flex; gap:10px; align-items:center; flex-wrap:wrap; color:var(--gr-text) !important; }
+  #gr-root details.gr-vol > summary:hover { background:var(--gr-hover) !important; }
+  #gr-root details.gr-vol.gr-sel { border-color:var(--gr-accent); box-shadow:0 0 0 1px var(--gr-accent) inset; }
+  #gr-root details.gr-vol.gr-sel > summary { background:var(--gr-sel) !important; }
+  #gr-root .gr-vol-b { padding:8px 10px 10px 32px; border-top:1px solid var(--gr-border); }
+  #gr-root .gr-kv { display:grid; grid-template-columns:150px 1fr; gap:4px 12px; margin-bottom:8px; }
+  #gr-root .gr-kv > div:nth-child(odd) { color:var(--gr-muted) !important; }
+  #gr-root .gr-badge { display:inline-block; padding:1px 8px; border-radius:10px; font-size:10px; font-weight:700; white-space:nowrap; }
+  #gr-root .gr-b-match { background:var(--gr-ok-bg) !important; color:var(--gr-ok) !important; }
+  #gr-root .gr-b-foreign { background:var(--gr-warn-bg) !important; color:var(--gr-warn) !important; }
+  #gr-root .gr-b-in-use, #gr-root .gr-b-running, #gr-root .gr-b-duplicate { background:var(--gr-bad-bg) !important; color:var(--gr-bad) !important; }
+  #gr-root .gr-card { background:var(--gr-card) !important; border:1px solid var(--gr-border); border-radius:4px; margin-bottom:10px; }
+  #gr-root .gr-card-h { padding:8px 10px; border-bottom:1px solid var(--gr-border); font-weight:600; display:flex; gap:8px; align-items:center; flex-wrap:wrap; color:var(--gr-text) !important; }
+  #gr-root .gr-card-b { padding:10px; }
+  #gr-root .gr-btn { padding:5px 12px !important; border:1px solid var(--gr-border) !important; background:var(--gr-card2) !important; color:var(--gr-text) !important; border-radius:3px !important; cursor:pointer; font-size:12px !important; line-height:1.4 !important; height:auto !important; min-height:0 !important; }
+  #gr-root .gr-btn:hover:not([disabled]) { border-color:var(--gr-accent) !important; color:var(--gr-accent-dark) !important; }
+  #gr-root .gr-btn[disabled] { opacity:.4; cursor:not-allowed; }
+  #gr-root .gr-btn.gr-primary { background:var(--gr-accent) !important; border-color:var(--gr-accent) !important; color:#fff !important; }
+  #gr-root .gr-btn.gr-danger { background:#c62828 !important; border-color:#c62828 !important; color:#fff !important; }
+  #gr-root .gr-steps { display:flex; flex-wrap:wrap; gap:10px; margin:10px 0; }
+  #gr-root .gr-steps > div { width:220px; }
+  #gr-root .gr-msg { padding:7px 10px; border-radius:3px; margin:6px 0; }
+  #gr-root .gr-msg.gr-err { background:var(--gr-bad-bg) !important; color:var(--gr-bad) !important; }
+  #gr-root .gr-msg.gr-warn { background:var(--gr-warn-bg) !important; color:var(--gr-warn) !important; }
+  #gr-root .gr-msg.gr-ok { background:var(--gr-ok-bg) !important; color:var(--gr-ok) !important; }
+  #gr-root pre.gr-log { background:var(--gr-code) !important; color:var(--gr-code-text) !important; border:1px solid var(--gr-border); padding:8px; max-height:360px; overflow:auto; font-size:11px; line-height:1.45; white-space:pre-wrap; margin:6px 0 0 0; }
+  #gr-root label { display:block; margin:6px 0 2px; font-weight:600; font-size:11px; color:var(--gr-text) !important; }
+  #gr-root input[type=text], #gr-root select { width:100%; max-width:420px; padding:5px 7px; border:1px solid var(--gr-border) !important; border-radius:3px; background:var(--gr-card2) !important; color:var(--gr-text) !important; font-size:12px; height:auto; }
+  #gr-root select option { background:var(--gr-card); color:var(--gr-text); }
+  #gr-root .gr-check { display:flex; gap:8px; align-items:center; font-weight:400; cursor:pointer; }
+  /* Morpheus restyles/hides native checkboxes: force a real, clickable one */
+  #gr-root input[type=checkbox] { -webkit-appearance:checkbox !important; appearance:auto !important; opacity:1 !important; position:static !important;
+    visibility:visible !important; display:inline-block !important; width:16px !important; height:16px !important; margin:0 !important;
+    pointer-events:auto !important; accent-color:var(--gr-accent); cursor:pointer; flex:0 0 auto; }
+  #gr-root .gr-confirmbox { margin-top:10px; padding:8px 10px; border:1px dashed var(--gr-border); border-radius:4px; max-width:640px; }
+  #gr-root .gr-big { font-size:12px; font-weight:600; }
+  #gr-root .gr-ok-text { color:var(--gr-ok) !important; font-weight:600; }
+  #gr-root input::placeholder { color:var(--gr-muted) !important; opacity:.6; font-style:italic; }
+  #gr-root .gr-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:4px 16px; }
+  #gr-root .gr-bad-text { color:var(--gr-bad) !important; }
+  #gr-root .gr-spin { display:inline-block; width:12px; height:12px; border:2px solid var(--gr-border); border-top-color:var(--gr-accent); border-radius:50%; animation:grSpin .7s linear infinite; vertical-align:middle; }
+  @keyframes grSpin { to { transform:rotate(360deg); } }
+</style>
+
+<div id="gr-root" data-cluster-id="{{clusterId}}" data-cluster-name="{{clusterName}}" data-version="{{version}}">
+  <div class="gr-head">
+    <h3>GFS2 Storage</h3>
+    <span class="gr-muted">GFS2 Rescue {{version}}</span>
+    <button type="button" class="gr-btn" id="gr-rescan-storage" style="margin-left:auto" title="SCSI/iSCSI rescan on every host, for a LUN just exported">Rescan storage</button>
+    <button type="button" class="gr-btn" id="gr-refresh">Rescan</button>
+  </div>
+  <div class="gr-clusterbox">
+    <div><span class="gr-k">Morpheus cluster</span><span class="gr-v">{{clusterName}}</span></div>
+    <div><span class="gr-k">DLM cluster name</span><span class="gr-v" id="gr-dlm">checking...</span></div>
+    <div><span class="gr-k">Hosts in this cluster</span><span class="gr-v" id="gr-hostcount">-</span></div>
+    <div><span class="gr-k">API credential (Attach)</span><span class="gr-v" id="gr-cred">checking...</span></div>
+  </div>
+  <div id="gr-body"><span class="gr-spin"></span> <span class="gr-muted">Asking each host in {{clusterName}} what it sees...</span></div>
+</div>
+
+<script nonce="{{nonce}}">
+  /* Usually stripped from tab HTML; gfs2-rescue.js is loaded on every page by the plugin's
+     global component and binds #gr-root itself. Kept for UIs that do run it. */
+  (function () {
+    var root = document.getElementById('gr-root');
+    if (!root || root.dataset.grBound || typeof window.grInit !== 'function') return;
+    root.dataset.grBound = '1';
+    window.grInit(root);
+  })();
+</script>

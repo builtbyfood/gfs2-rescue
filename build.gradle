@@ -1,0 +1,85 @@
+buildscript {
+    repositories {
+        mavenLocal()
+        mavenCentral()
+        maven { url "https://plugins.gradle.org/m2/" }
+        maven { url "https://nexus.bertramlabs.com/content/repositories/releases" }
+        maven { url "https://nexus.bertramlabs.com/content/repositories/publicReleases" }
+    }
+    dependencies {
+        // goooler fork: johnrengelman shadow 8.1.1 does not work on Gradle 9 (same as HPE's 9.1 plugins)
+        classpath "io.github.goooler.shadow:shadow-gradle-plugin:8.1.8"
+        classpath "com.morpheusdata:morpheus-plugin-gradle:$morpheusGradleVersion"
+        classpath "com.bertramlabs.plugins:asset-pipeline-gradle:$assetPipelineVersion"
+    }
+}
+
+apply plugin: 'java'
+apply plugin: 'groovy'
+apply plugin: 'io.github.goooler.shadow'
+apply plugin: 'asset-pipeline'
+apply plugin: 'com.morpheusdata.morpheus-plugin-gradle'
+
+group = 'com.morpheusdata.gfs2rescue'
+
+java {
+    sourceCompatibility = JavaVersion.toVersion('25')
+    targetCompatibility = JavaVersion.toVersion('25')
+}
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+    maven { url "https://nexus.bertramlabs.com/content/repositories/releases" }
+    maven { url "https://nexus.bertramlabs.com/content/repositories/publicReleases" }
+}
+
+configurations {
+    provided
+    // plugin-api 1.5.0 still declares Groovy 3 (org.codehaus.groovy) while the build uses Groovy 4
+    // (org.apache.groovy): both claim the same capability. Pick the newer one, as HPE's 9.1 plugins do.
+    configureEach {
+        resolutionStrategy.capabilitiesResolution.all {
+            selectHighestVersion()
+        }
+    }
+}
+
+sourceSets {
+    main {
+        compileClasspath += configurations.provided
+    }
+}
+
+dependencies {
+    provided "com.morpheusdata:morpheus-plugin-api:$morpheusApiVersion"
+    provided "org.apache.groovy:groovy-all:$groovyVersion"
+    implementation "org.slf4j:slf4j-api:$slf4jVersion"
+}
+
+jar {
+    manifest {
+        attributes(
+            'Plugin-Class': 'com.morpheusdata.gfs2rescue.Gfs2RescuePlugin',
+            'Plugin-Version': version,
+            'Morpheus-Name': 'GFS2 Rescue',
+            'Morpheus-Organization': 'Travis DeLuca',
+            'Morpheus-Code': 'gfs2-rescue',
+            'Morpheus-Description': 'Take over GFS2 shared storage left behind by a cluster that is gone: inspect, check, repair, adopt, verify',
+            'Morpheus-Labels': 'Plugin, Storage, Infrastructure',
+            'Morpheus-Repo': 'https://github.com/builtbyfood/morpheus-gfs2-rescue',
+            'Morpheus-Min-Appliance-Version': minVersion
+        )
+    }
+}
+
+assets {
+    packagePlugin = false
+}
+
+tasks.assemble.dependsOn tasks.shadowJar
+
+// Build (Java 25 + Gradle 9.x, same as HPE's 9.1 plugins):
+//   sdk use java 25-tem ; sdk use gradle 9.1.0
+//   gradle clean shadowJar --no-daemon
+// Output: build/libs/morpheus-gfs2-rescue-<version>-all.jar

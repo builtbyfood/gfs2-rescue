@@ -1,2 +1,7 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# The bundled script runs under bash on the hosts: keep LF even when checked out on Windows
+*.sh   text eol=lf
+*.hbs  text eol=lf
+*.js   text eol=lf
+*.groovy text eol=lf
+gradlew text eol=lf
+*.bat  text eol=crlf
