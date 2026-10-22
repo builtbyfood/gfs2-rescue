@@ -67,7 +67,7 @@ jar {
             'Morpheus-Code': 'gfs2-rescue',
             'Morpheus-Description': 'Take over GFS2 shared storage left behind by a cluster that is gone: inspect, check, repair, adopt, verify',
             'Morpheus-Labels': 'Plugin, Storage, Infrastructure',
-            'Morpheus-Repo': 'https://github.com/builtbyfood/morpheus-gfs2-rescue',
+            'Morpheus-Repo': 'https://github.com/builtbyfood/gfs2-rescue',
             'Morpheus-Min-Appliance-Version': minVersion
         )
     }
