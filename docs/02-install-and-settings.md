@@ -2,8 +2,9 @@
 
 ## Requirements
 
-**Appliance:** Morpheus 9.1.0 or later. The user running steps needs the `admin-cm` permission at
-full access (the same permission that manages clusters).
+**Appliance:** Morpheus 9.0.x or 9.1.0 and later, with the jar built for that line (see
+[Build](#build)). The user running steps needs the `admin-cm` permission at full access (the same
+permission that manages clusters).
 
 **Hosts:** every hypervisor host in the cluster needs:
 
@@ -17,15 +18,27 @@ full access (the same permission that manages clusters).
 
 ## Build
 
-The pins match HPE's own 9.1 plugins: plugin-api 1.5.0, morpheus-plugin-gradle 1.2.8,
-Groovy 4.0.31, Java 25, Gradle 9.x.
+One source tree builds a jar for each Morpheus line. The jar for one line does not load on the other:
+9.0 runs plugins on Plugin API 1.4.1, Groovy 3 and an older JVM, and 9.1 on Plugin API 1.5.0 and
+Groovy 4.
+
+| Morpheus | Gradle option | Pins | Jar |
+| --- | --- | --- | --- |
+| 9.1.0 and later | none (the default) | plugin-api 1.5.0, Groovy 4.0.31, Java 25, as HPE's own 9.1 plugins | `build/libs/morpheus-gfs2-rescue-<version>-all.jar` |
+| 9.0.x | `-PmorpheusTarget=9.0` | plugin-api 1.4.1, Groovy 3.0.9, Java 11 bytecode | `build-9.0/libs/morpheus-gfs2-rescue-<version>-9.0-all.jar` |
+
+Both builds use morpheus-plugin-gradle 1.2.8 and Gradle 9.x, and run Gradle on Java 25. The 9.0
+build compiles with a Java 17 toolchain: Gradle uses an installed JDK 17 if it finds one and
+downloads one otherwise (the foojay resolver in `settings.gradle`). Every Plugin API call the plugin
+makes is the same in 1.4.1 and 1.5.0, so the two jars run the same code.
 
 Linux or macOS:
 
 ```
 sdk use java 25-tem
 sdk use gradle 9.1.0
-gradle clean shadowJar --no-daemon
+gradle clean shadowJar --no-daemon                          # Morpheus 9.1
+gradle clean shadowJar -PmorpheusTarget=9.0 --no-daemon    # Morpheus 9.0.x
 ```
 
 Windows (PowerShell), once:
@@ -41,11 +54,13 @@ Each session:
 $env:JAVA_HOME = (Get-ChildItem 'C:\Program Files\Eclipse Adoptium' -Directory | Where-Object Name -like 'jdk-25*' | Select-Object -First 1).FullName
 $env:Path = "C:\gradle\gradle-9.1.0\bin;$env:JAVA_HOME\bin;$env:Path"
 gradle wrapper --gradle-version 9.1.0      # first time only
-.\gradlew.bat clean shadowJar --no-daemon
+.\gradlew.bat clean shadowJar --no-daemon                          # Morpheus 9.1
+.\gradlew.bat clean shadowJar -PmorpheusTarget=9.0 --no-daemon    # Morpheus 9.0.x
 ```
 
-The jar is `build/libs/morpheus-gfs2-rescue-<version>-all.jar`. To confirm it contains everything
-it needs:
+The jar is `build/libs/morpheus-gfs2-rescue-<version>-all.jar` for 9.1, or
+`build-9.0/libs/morpheus-gfs2-rescue-<version>-9.0-all.jar` for 9.0.x. To confirm it contains
+everything it needs (use `build-9.0\libs` for the 9.0 jar):
 
 ```powershell
 tar -tf (Get-ChildItem build\libs\*-all.jar).FullName | Select-String 'gfs2-rescue\.sh|gfs2RescueClusterTab|gfs2-rescue\.js'
@@ -59,7 +74,8 @@ strips any CR from the bundled script when it loads, so a CRLF copy never reache
 
 ## Install or upgrade
 
-Administration → Integrations → Plugins → **Add**, and upload the jar. Uploading a newer version
+Administration → Integrations → Plugins → **Add**, and upload the jar built for your Morpheus
+version (the footer shows it). The 9.1 jar does not load on 9.0. Uploading a newer version
 replaces the old one. Reload the browser page afterwards: the page script is only picked up on a
 fresh load.
 

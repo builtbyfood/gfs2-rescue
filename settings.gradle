@@ -1,1 +1,6 @@
+plugins {
+    // Lets Gradle download the Java 17 toolchain for -PmorpheusTarget=9.0 when none is installed.
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
 rootProject.name = 'morpheus-gfs2-rescue'

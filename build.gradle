@@ -22,9 +22,32 @@ apply plugin: 'com.morpheusdata.morpheus-plugin-gradle'
 
 group = 'com.morpheusdata.gfs2rescue'
 
-java {
-    sourceCompatibility = JavaVersion.toVersion('25')
-    targetCompatibility = JavaVersion.toVersion('25')
+// One source tree, one jar per Morpheus line. The default builds for 9.1 exactly as before.
+// -PmorpheusTarget=9.0 builds for 9.0.x instead, which runs Plugin API 1.4.1 on Groovy 3 and an
+// older JVM: the 9.1 jar (Java 25, Groovy 4) cannot load there. Every Plugin API member this plugin
+// uses is the same in 1.4.1 and 1.5.0. The 9.0 build compiles with a Java 17 toolchain (downloaded
+// by Gradle if none is installed) to Java 11 bytecode. It writes to build-9.0/, outside build/, so
+// neither build's clean deletes the other's jar.
+ext.morpheusTarget = (project.findProperty('morpheusTarget') ?: '9.1').toString()
+if (!(morpheusTarget in ['9.0', '9.1'])) {
+    throw new GradleException("morpheusTarget must be 9.0 or 9.1, not ${morpheusTarget}")
+}
+boolean for90 = morpheusTarget == '9.0'
+ext.targetApiVersion = for90 ? morpheus90ApiVersion : morpheusApiVersion
+ext.targetMinVersion = for90 ? min90Version : minVersion
+
+if (for90) {
+    layout.buildDirectory = layout.projectDirectory.dir('build-9.0')
+    java {
+        toolchain { languageVersion = JavaLanguageVersion.of(17) }
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+} else {
+    java {
+        sourceCompatibility = JavaVersion.toVersion('25')
+        targetCompatibility = JavaVersion.toVersion('25')
+    }
 }
 
 repositories {
@@ -52,8 +75,13 @@ sourceSets {
 }
 
 dependencies {
-    provided "com.morpheusdata:morpheus-plugin-api:$morpheusApiVersion"
-    provided "org.apache.groovy:groovy-all:$groovyVersion"
+    provided "com.morpheusdata:morpheus-plugin-api:$targetApiVersion"
+    if (for90) {
+        provided "org.codehaus.groovy:groovy:$groovy90Version"
+        provided "org.codehaus.groovy:groovy-json:$groovy90Version"
+    } else {
+        provided "org.apache.groovy:groovy-all:$groovyVersion"
+    }
     implementation "org.slf4j:slf4j-api:$slf4jVersion"
 }
 
@@ -68,7 +96,7 @@ jar {
             'Morpheus-Description': 'Take over GFS2 shared storage left behind by a cluster that is gone: inspect, check, repair, adopt, verify',
             'Morpheus-Labels': 'Plugin, Storage, Infrastructure',
             'Morpheus-Repo': 'https://github.com/builtbyfood/gfs2-rescue',
-            'Morpheus-Min-Appliance-Version': minVersion
+            'Morpheus-Min-Appliance-Version': targetMinVersion
         )
     }
 }
@@ -77,9 +105,17 @@ assets {
     packagePlugin = false
 }
 
+// 9.1: morpheus-gfs2-rescue-<version>-all.jar (unchanged); 9.0: morpheus-gfs2-rescue-<version>-9.0-all.jar
+if (for90) {
+    tasks.named('shadowJar') { archiveClassifier.set('9.0-all') }
+}
+
 tasks.assemble.dependsOn tasks.shadowJar
 
 // Build (Java 25 + Gradle 9.x, same as HPE's 9.1 plugins):
 //   sdk use java 25-tem ; sdk use gradle 9.1.0
 //   gradle clean shadowJar --no-daemon
 // Output: build/libs/morpheus-gfs2-rescue-<version>-all.jar
+// Morpheus 9.0.x:
+//   gradle clean shadowJar -PmorpheusTarget=9.0 --no-daemon
+// Output: build-9.0/libs/morpheus-gfs2-rescue-<version>-9.0-all.jar

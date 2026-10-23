@@ -88,7 +88,7 @@ shell when the appliance is unavailable.
 
 ## Scope
 
-- Morpheus 9.1.0 or later, HVM clusters.
+- Morpheus 9.0.x or 9.1.0 and later, HVM clusters. Each line has its own jar ([Build](02-install-and-settings.md#build)).
 - GFS2 on multipath devices (`/dev/mapper/<wwid>`). Single-path devices are not shown.
 - One step at a time per volume.
 - Defining recovered VMs from the old cluster's definitions is not automated in this version.
