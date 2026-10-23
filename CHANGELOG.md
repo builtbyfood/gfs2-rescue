@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+- Morpheus 9.0.x support: `-PmorpheusTarget=9.0` builds a jar for 9.0.x
+  (`build-9.0/libs/morpheus-gfs2-rescue-<version>-9.0-all.jar`) with plugin-api 1.4.1, Groovy 3.0.9
+  and Java 11 bytecode, from the same source. The default build for 9.1 is unchanged. The 9.0
+  build uses a Java 17 toolchain, which Gradle downloads if none is installed. Tested on
+  Morpheus 9.0.1. No code changes.
+
 ## 0.1.22
 - Documentation: screenshots redacted. Cluster and DLM names, host names, LUN WWIDs, non-demo
   datastore names, the appliance address and unrelated credentials are covered with solid boxes;

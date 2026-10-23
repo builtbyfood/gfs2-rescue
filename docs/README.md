@@ -1,6 +1,6 @@
 # GFS2 Rescue documentation
 
-GFS2 Rescue is a plugin for HPE Morpheus 9.1 (HVM clusters). It adds a **GFS2 Storage** tab to each
+GFS2 Rescue is a plugin for HPE Morpheus 9.0 and 9.1 (HVM clusters). It adds a **GFS2 Storage** tab to each
 cluster that takes over a GFS2 volume created by another cluster and attaches it as an HPE
 Clustered Datastore, without reformatting it and without losing anything on it: for cluster to
 cluster migration, after a cluster rebuild or a lost appliance, for disaster recovery, or to

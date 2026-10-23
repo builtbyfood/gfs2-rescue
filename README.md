@@ -1,4 +1,4 @@
-# GFS2 Rescue for HPE Morpheus (HVM) 9.1
+# GFS2 Rescue for HPE Morpheus (HVM) 9.0 and 9.1
 
 Lets an HVM cluster take over GFS2 shared storage created by another cluster, and attach it as an
 HPE Clustered Datastore, **without reformatting it** and with proof that nothing on it was lost.
@@ -46,9 +46,13 @@ Full documentation is in [`docs/`](docs/README.md):
 ```powershell
 .\gradlew.bat clean shadowJar --no-daemon
 # build\libs\morpheus-gfs2-rescue-<version>-all.jar
+
+# Morpheus 9.0.x:
+.\gradlew.bat clean shadowJar -PmorpheusTarget=9.0 --no-daemon
+# build-9.0\libs\morpheus-gfs2-rescue-<version>-9.0-all.jar
 ```
 
-1. Administration → Integrations → Plugins → Add → upload the jar.
+1. Administration → Integrations → Plugins → Add → upload the jar for your Morpheus version.
 2. Plugin settings: tick **Enable GFS2 Rescue**; set **API token credential** to the name or ID of a
    Trust credential holding a Morpheus API token.
 3. Infrastructure → Clusters → your cluster → **GFS2 Storage**.
@@ -58,8 +62,15 @@ takeover is done.
 
 ## Requirements
 
-Morpheus 9.1.0+, HVM clusters, and GFS2 on multipath devices. Build pins match HPE's own 9.1 plugins: plugin-api 1.5.0,
-morpheus-plugin-gradle 1.2.8, Groovy 4.0.31, Java 25, Gradle 9.x.
+Morpheus 9.0.x or 9.1.0+, HVM clusters, and GFS2 on multipath devices. Each Morpheus line needs its own jar,
+built from the same source:
+
+| Morpheus | Build | Jar | Pins |
+| --- | --- | --- | --- |
+| 9.1.0+ | default | `build/libs/…-all.jar` | plugin-api 1.5.0, Groovy 4.0.31, Java 25 (match HPE's own 9.1 plugins) |
+| 9.0.x | `-PmorpheusTarget=9.0` | `build-9.0/libs/…-9.0-all.jar` | plugin-api 1.4.1, Groovy 3.0.9, Java 11 bytecode |
+
+Both use morpheus-plugin-gradle 1.2.8 and Gradle 9.x. See [Install and settings](docs/02-install-and-settings.md#build).
 
 ## Changes
 
