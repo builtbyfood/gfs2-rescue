@@ -116,7 +116,8 @@ class MorpheusApi {
         String base = (settings.applianceUrl() ?: 'https://127.0.0.1').replaceAll('/+$', '')
         def rb = HttpRequest.newBuilder(URI.create(base + path)).timeout(Duration.ofSeconds(60))
                 .header('Authorization', "Bearer ${tok}").header('Accept', 'application/json')
-        if (method == 'POST') rb.header('Content-Type', 'application/json').POST(HttpRequest.BodyPublishers.ofString(JsonOutput.toJson(body)))
+        if (method == 'POST' || method == 'PUT')
+            rb.header('Content-Type', 'application/json').method(method, HttpRequest.BodyPublishers.ofString(JsonOutput.toJson(body ?: [:])))
         else rb.GET()
         HttpResponse<String> resp = http.send(rb.build(), HttpResponse.BodyHandlers.ofString())
         Map parsed = [:]
@@ -189,5 +190,52 @@ class MorpheusApi {
         } catch (Throwable e) {
             return [ok: false, error: e.message]
         }
+    }
+
+    // ---------------------------------------------------------------- VM import (Recover VMs)
+    // Calls proven on 9.1 with hvm-vm-import.py: cluster refresh, convert to managed
+    // (PUT /api/servers/{id}/install-agent with installAgent=false), instance environment.
+
+    /** Starts a cluster refresh; an already-running refresh counts as started. */
+    Map refresh(Long clusterId) {
+        Map t = token(); if (!t.ok) return t
+        try { call(t.token as String, 'GET', "/api/clusters/${clusterId}/refresh".toString(), null); return [ok: true] }
+        catch (Throwable e) {
+            if (e.message?.contains('already in progress')) return [ok: true, running: true]
+            return [ok: false, error: e.message]
+        }
+    }
+
+    /** For each VM name: waiting (not discovered yet), converted (instance created) or error. */
+    Map importStep(Long groupId, List<String> names, String environment) {
+        Map t = token(); if (!t.ok) return t
+        String tok = t.token as String
+        Map out = [:]
+        names.each { String name ->
+            try {
+                String q = URLEncoder.encode(name, 'UTF-8')
+                List<Map> servers = ((call(tok, 'GET', "/api/servers?max=200&name=${q}".toString(), null).servers ?: []) as List<Map>)
+                        .findAll { it.externalId == name }
+                if (servers.size() > 1) { out[name] = [state: 'error', error: "more than one Morpheus server has external id '${name}'".toString()]; return }
+                if (!servers) { out[name] = [state: 'waiting']; return }
+                Map srv = servers[0]
+                Map inst = ((call(tok, 'GET', "/api/instances?max=200&name=${q}".toString(), null).instances ?: []) as List<Map>)
+                        .find { (it.servers as List)?.contains(srv.id) }
+                if (!inst) {
+                    call(tok, 'PUT', "/api/servers/${srv.id}/install-agent".toString(),
+                         [server: [provisionSiteId: groupId], installAgent: false])
+                    out[name] = [state: 'converting', serverId: srv.id]
+                    return
+                }
+                if (environment && inst.instanceContext != environment) {
+                    try { call(tok, 'PUT', "/api/instances/${inst.id}".toString(), [instance: [instanceContext: environment]]) }
+                    catch (Throwable e) { out[name] = [state: 'managed', instanceId: inst.id, serverId: srv.id, warning: "environment not set: ${e.message?.take(120)}".toString()]; return }
+                }
+                out[name] = [state: 'managed', instanceId: inst.id, serverId: srv.id]
+            } catch (Throwable e) {
+                out[name] = [state: 'error', error: e.message?.take(300)]
+            }
+        }
+        return [ok: true, vms: out]
     }
 }

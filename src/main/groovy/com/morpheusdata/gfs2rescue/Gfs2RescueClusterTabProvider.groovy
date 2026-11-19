@@ -12,9 +12,11 @@ import groovy.util.logging.Slf4j
 
 /**
  * Infrastructure -> Clusters -> (cluster) -> GFS2 Storage.
- * The template only carries ids in data-* attributes; everything else is loaded by
- * gfs2-rescue.js through the controller (plugin-api renders the model map as the
- * template root, so references are {{clusterId}}, not {{object.clusterId}}).
+ * The template is a small static shell: ids and the load mode in data-* attributes, no styles,
+ * no data. show() and renderTemplate() only read the cluster object Morpheus passes in and the
+ * cached plugin settings; neither calls a service or a host. Styles, gfs2-rescue.js and every
+ * request are loaded by the page the first time the tab is opened (plugin-api renders the model
+ * map as the template root, so references are {{clusterId}}, not {{object.clusterId}}).
  */
 @Slf4j
 class Gfs2RescueClusterTabProvider extends AbstractClusterTabProvider {
@@ -46,6 +48,7 @@ class Gfs2RescueClusterTabProvider extends AbstractClusterTabProvider {
             model.object = [
                 clusterId  : cluster?.id ?: 0,
                 clusterName: cluster?.name ?: 'Cluster',
+                loadMode   : settings.scanOnOpen() ? 'onOpen' : 'manual',
                 version    : Gfs2RescuePlugin.VERSION
             ]
             return getRenderer().renderTemplate('hbs/gfs2RescueClusterTab', model)

@@ -20,7 +20,8 @@ If you have never done a takeover with this plugin, rehearse on a scratch LUN fi
 
 ## 1. Open the tab and check you are in the right place
 
-Infrastructure → Clusters → your cluster → **GFS2 Storage**.
+Infrastructure → Clusters → your cluster → **GFS2 Storage**, then click **Scan now**. The tab does
+not ask the hosts anything until you do; if it shows an earlier scan, its time is at the top.
 
 The box at the top shows the Morpheus cluster name, the DLM cluster name the hosts report, how
 many hosts are in the cluster, and the API credential Attach will use. Check all four.

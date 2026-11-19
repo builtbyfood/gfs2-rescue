@@ -16,7 +16,7 @@ import groovy.util.logging.Slf4j
 @Slf4j
 class Gfs2RescuePlugin extends Plugin {
 
-    static final String VERSION = '0.1.22'
+    static final String VERSION = '0.1.25'
 
     @Override
     String getCode() { return 'gfs2-rescue' }
@@ -47,15 +47,39 @@ class Gfs2RescuePlugin extends Plugin {
                 helpText     : 'Shows the GFS2 Storage tab on clusters and allows its steps to run on hypervisor hosts through the Morpheus agent. Leave off except while taking over a GFS2 volume. Turning it off hides the tab and rejects every request; scripts and run folders already on hosts are left in place.'
             ),
             new OptionType(
+                name         : 'Scan when the tab is opened',
+                code         : 'gfs2-rescue-scan-on-open',
+                fieldName    : Settings.SCAN_ON_OPEN,
+                fieldLabel   : 'Scan when the tab is opened',
+                fieldContext : 'config',
+                inputType    : OptionType.InputType.CHECKBOX,
+                defaultValue : 'off',
+                displayOrder : 1,
+                required     : false,
+                helpText     : 'Off (recommended): opening the GFS2 Storage tab shows the last scan with its time and waits for Scan now. On: the tab scans the hosts the first time it is opened. A scan runs commands on every host of the cluster. Either way nothing is scanned while the cluster page loads.'
+            ),
+            new OptionType(
                 name         : 'API token credential',
                 code         : 'gfs2-rescue-api-credential',
                 fieldName    : Settings.API_CREDENTIAL,
                 fieldLabel   : 'API token credential (name or ID)',
                 fieldContext : 'config',
                 inputType    : OptionType.InputType.TEXT,
-                displayOrder : 1,
+                displayOrder : 2,
                 required     : false,
                 helpText     : 'Name or numeric ID of a Trust credential (Infrastructure > Trust > Credentials) holding a Morpheus API token: an API Key credential, or Username and Password with the token as the password. Used by the Attach step to add the datastore through the Morpheus API. The GFS2 Storage tab shows which credential it found. The token is never shown or logged.'
+            ),
+            new OptionType(
+                name         : 'VM import batch size',
+                code         : 'gfs2-rescue-batch',
+                fieldName    : Settings.BATCH,
+                fieldLabel   : 'VM import batch size',
+                fieldContext : 'config',
+                inputType    : OptionType.InputType.TEXT,
+                defaultValue : '1',
+                displayOrder : 4,
+                required     : false,
+                helpText     : 'How many VMs the Recover VMs screen defines and imports at a time: 1 to 3. Use 1 on a small appliance.'
             ),
             new OptionType(
                 name         : 'Appliance API URL',
@@ -64,7 +88,7 @@ class Gfs2RescuePlugin extends Plugin {
                 fieldLabel   : 'Appliance API URL',
                 fieldContext : 'config',
                 inputType    : OptionType.InputType.TEXT,
-                displayOrder : 2,
+                displayOrder : 3,
                 required     : false,
                 helpText     : 'Leave blank to use https://127.0.0.1 (the appliance itself). Set it to the appliance address if the API is not served on the loopback address.'
             )
@@ -74,8 +98,8 @@ class Gfs2RescuePlugin extends Plugin {
         HostRunner runner = new HostRunner(this, morpheus)
         this.controllers.add(new Gfs2RescueController(this, morpheus, runner, settingsReader))
         registerProvider(new Gfs2RescueClusterTabProvider(this, morpheus, settingsReader))
-        // the tab's own <script> ran on 9.1, but tab HTML has lost scripts on older UIs;
-        // this also loads gfs2-rescue.js on every page while the plugin is enabled
+        // A small inline watcher on every page while the plugin is enabled (tab HTML has lost its
+        // scripts on older UIs). It loads gfs2-rescue.js only when the tab is first opened.
         registerProvider(new Gfs2RescueLoaderProvider(this, morpheus, settingsReader))
 
         log.info("GFS2 Rescue ${VERSION} initialized (bundled script sha256 ${runner.scriptSha})")

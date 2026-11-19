@@ -12,9 +12,20 @@ sudo grep 'GFS2 Rescue' /var/log/morpheus/morpheus-ui/current | tail -50
 **There is no GFS2 Storage tab.** The plugin is off. Plugin settings → tick Enable GFS2 Rescue →
 save, then reload the cluster page (allow up to 15 seconds for the setting to be re-read).
 
-**The tab says "Asking each host…" and never finishes.** The page script did not load. Reload the
-page with the cache bypassed (Ctrl+F5). If it persists, check the jar contains
-`assets/gfs2-rescue.js` ([Install](02-install-and-settings.md#build)).
+**The tab says "Not loaded" and has no Scan now button.** The page watcher did not start. Reload
+the page with the cache bypassed (Ctrl+F5); the watcher only arrives with a fresh page.
+
+**"The tab did not load (…)" with a Retry button.** The tab's script could not be fetched. Click
+Retry. If it persists, check the jar contains `assets/gfs2-rescue.js`
+([Install](02-install-and-settings.md#build)) and look for a blocked script in the browser console.
+
+**The tab shows an old scan.** That is the last scan kept by the appliance; its time is at the top.
+Click **Scan now**. To scan whenever the tab is opened, turn on **Scan when the tab is opened** in
+the plugin settings.
+
+**A scan sits on "Asking each host…".** The counter shows the seconds so far. Each host command has
+its own time limit, so the scan ends with a result or an error; an unreachable host shows in the
+Hosts table with the reason.
 
 **"rejected by the CSRF check (reload the page)".** The page's security token went stale, usually
 after a long idle period or an appliance restart. Reload.
@@ -28,7 +39,7 @@ appliance log has the exception.
 ## Hosts
 
 **Script shows `failed`.** The upload to `/opt/gfs2-rescue` failed or its hash did not match. The
-Problem column has the reason. Check free space and that `/opt` is writable, then Rescan.
+Problem column has the reason. Check free space and that `/opt` is writable, then Scan now.
 
 **"reports DLM cluster X, not Y: left out".** That host belongs to a different DLM cluster from the
 rest, for example an old-cluster host still in this Morpheus cluster record. Nothing runs on it.

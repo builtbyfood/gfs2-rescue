@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gfs2-rescue.sh v1.1 - take over a GFS2 volume left behind by a cluster (or appliance) that went
+# gfs2-rescue.sh v1.3 - take over a GFS2 volume left behind by a cluster (or appliance) that went
 # down, check and repair it before the takeover, and record every step as evidence.
 #
 #   inspect  [--json]                     every GFS2 volume this host sees (multipath maps first)
@@ -16,6 +16,15 @@
 #   restore-sb <dev> <rundir>             write the saved superblock region back
 #   rescan                                ask the SCSI/iSCSI layer for new LUNs (no multipath reload)
 #   record   <step> <result> [detail]     add a step result to RUN's log and state.json
+#   vms      <mountpoint>                 read-only, JSON: VM definitions found on a mounted datastore
+#                                         (mvm-hb/ and VM folders), newest copy per VM, with disk-chain
+#                                         status after rewriting the old cluster's mount to this one
+#   define-vm <mountpoint> <xml> --yes    define one VM on this host from such a definition: rewrite
+#                                         disk paths, repoint backing paths that still name the old
+#                                         mount (qemu-img rebase -u, header only), define it stopped.
+#                                         Keeps the VM's UUID, MAC addresses and disk serials. JSON out
+#   capacity                              read-only, JSON: this host's memory and CPUs, what running
+#                                         and stopped VMs reserve, and its networks and portgroups
 #
 # Order: inspect -> (reuuid, only for a duplicate) -> collect -> check -> (repair) -> adopt
 #        -> add the datastore in Morpheus, reformatting OFF (the plugin's Attach step) -> verify
@@ -23,7 +32,7 @@
 # RUN=<dir> reuses a run folder (default /var/lib/gfs2-rescue/<timestamp>). --yes skips prompts
 # (for automation; the caller is then responsible for the array snapshot).
 set -uo pipefail
-VERSION=1.1
+VERSION=1.3
 
 RUN=${RUN:-/var/lib/gfs2-rescue/$(date +%Y%m%d-%H%M%S)}
 die()   { echo "ERROR: $*" >&2; [[ -n ${LOG:-} ]] && printf '\n**ERROR: %s**\n' "$*" >>"$LOG"; state "${STEP:-?}" error "$*"; exit 1; }
@@ -325,6 +334,177 @@ restore_sb() {
   rec "superblock now" tunegfs2 -l "$dev"
   state restore-sb ok "superblock restored"; }
 
+# ---------------------------------------------------------------- VM recovery (vms / define-vm)
+vmtool() {  # vmtool <action> <args...>: Python helper, JSON on stdout
+  command -v python3 >/dev/null || { echo '{"ok":false,"error":"python3 not found on this host"}'; return 1; }
+  python3 - "$@" <<'PY'
+import json, os, re, subprocess, sys, time
+import xml.etree.ElementTree as ET
+UUIDMNT = re.compile(r"^(/mnt/[0-9a-fA-F-]{36})/")
+
+def sh(cmd):
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    return p.returncode, p.stdout, p.stderr
+
+def defined_here():
+    names, uuids = set(), set()
+    rc, out, _ = sh(["virsh", "list", "--all", "--name"]); names |= {x.strip() for x in out.splitlines() if x.strip()}
+    rc, out, _ = sh(["virsh", "list", "--all", "--uuid"]); uuids |= {x.strip() for x in out.splitlines() if x.strip()}
+    return names, uuids
+
+def nets_here():
+    rc, out, _ = sh(["virsh", "net-list", "--all", "--name"]); return {x.strip() for x in out.splitlines() if x.strip()}
+
+def mib(el):
+    if el is None or not (el.text or "").strip().isdigit(): return None
+    v = int(el.text.strip()); u = (el.get("unit") or "KiB").lower()
+    f = {"b": 1/1048576, "bytes": 1/1048576, "k": 1/1024, "kib": 1/1024, "m": 1, "mib": 1, "g": 1024, "gib": 1024}
+    return int(v * f.get(u, 1/1024))
+
+def chain(path, old, mount):
+    layers, fixes, status, cur, seen = [], [], "ok", path, set()
+    while cur and cur not in seen:
+        seen.add(cur)
+        if not os.path.exists(cur):
+            alt = mount + cur[len(old):] if old and cur.startswith(old + "/") else None
+            if alt and os.path.exists(alt) and layers:
+                fixes.append({"upper": layers[-1]["path"], "backing": alt}); status = "old-path" if status == "ok" else status
+                cur = alt; continue
+            layers.append({"path": cur, "ok": False}); status = "missing"; break
+        rc, out, err = sh(["qemu-img", "info", "-U", "--output=json", cur])
+        if rc != 0:
+            layers.append({"path": cur, "ok": False, "error": err.strip()[:200]}); status = "unreadable"; break
+        info = json.loads(out); layers.append({"path": cur, "ok": True, "format": info.get("format")})
+        nxt = info.get("full-backing-filename") or info.get("backing-filename")
+        if nxt and not nxt.startswith("/"): nxt = os.path.join(os.path.dirname(cur), nxt)
+        cur = nxt
+    return layers, fixes, status
+
+def describe(path, root, mount, names, uuids, nets):
+    name = (root.findtext("name") or "").strip(); uuid = (root.findtext("uuid") or "").strip()
+    disks, old = [], None
+    for d in root.iter("disk"):
+        if d.get("device") not in (None, "disk"): continue
+        s = d.find("source"); t = d.find("target")
+        src = s is not None and (s.get("file") or s.get("dev"))
+        if not src: continue
+        m = UUIDMNT.match(src)
+        if m and m.group(1) != mount: old = old or m.group(1)
+        disks.append({"target": t.get("dev") if t is not None else None, "source": src})
+    probs = []
+    for dk in disks:
+        src = dk["source"]
+        dk["path"] = mount + src[len(old):] if old and src.startswith(old + "/") else src
+        dk["outside"] = not dk["path"].startswith(mount + "/")
+        dk["layers"], dk["fixes"], dk["status"] = chain(dk["path"], old, mount)
+        if dk["status"] in ("missing", "unreadable"): probs.append(f"{dk['target']}: layer missing or unreadable")
+    ifs = []
+    for i in root.iter("interface"):
+        s = i.find("source"); mac = i.find("mac")
+        ifs.append({"type": i.get("type"), "network": s.get("network") if s is not None else None,
+                    "portgroup": s.get("portgroup") if s is not None else None,
+                    "bridge": s.get("bridge") if s is not None else None,
+                    "mac": mac.get("address") if mac is not None else None})
+
+    here = name in names or (uuid and uuid in uuids)
+    if here: probs.append("already defined on this host")
+    vc = root.find("vcpu")
+    return {"name": name, "uuid": uuid, "xml": path, "mtime": int(os.path.getmtime(path)),
+            "vcpu": int(vc.text) if vc is not None and (vc.text or "").strip().isdigit() else None,
+            "memoryMiB": mib(root.find("memory")), "oldPrefix": old, "disks": disks, "interfaces": ifs,
+            "definedHere": bool(here), "problems": probs,
+            "fixable": [f for dk in disks for f in dk["fixes"]]}
+
+def scan(mount):
+    mount = mount.rstrip("/")
+    if not os.path.isdir(mount): return {"ok": False, "error": f"{mount} is not mounted here"}
+    found, skipped = {}, 0
+    for dp, dns, fns in os.walk(mount):
+        for fn in fns:
+            if not fn.endswith(".xml"): continue
+            p = os.path.join(dp, fn)
+            try:
+                if os.path.getsize(p) > 2_000_000: continue
+                r = ET.parse(p).getroot()
+            except Exception:
+                skipped += 1; continue
+            if r.tag != "domain" or not (r.findtext("name") or "").strip(): continue
+            n = r.findtext("name").strip()
+            if n not in found or os.path.getmtime(p) > found[n][0]: found[n] = (os.path.getmtime(p), p, r)
+    names, uuids = defined_here(); nets = nets_here()
+    vms = [describe(p, r, mount, names, uuids, nets) for _, (m, p, r) in sorted(found.items())]
+    return {"ok": True, "mount": mount, "vms": vms, "skipped": skipped, "networks": sorted(nets)}
+
+def define(mount, xml, yes):
+    mount = mount.rstrip("/")
+    if not xml.startswith(mount + "/"): return {"ok": False, "error": "definition must be on the datastore"}
+    tree = ET.parse(xml); root = tree.getroot()
+    names, uuids = defined_here(); nets = nets_here()
+    d = describe(xml, root, mount, names, uuids, nets)
+    blocking = [p for p in d["problems"] if not p.startswith("network")]
+    if blocking: return {"ok": False, "name": d["name"], "error": "; ".join(blocking)}
+    if not yes: return {"ok": True, "dryRun": True, "name": d["name"], "rebase": d["fixable"]}
+    for f in d["fixable"]:
+        rc, out, err = sh(["qemu-img", "info", "-U", "--output=json", f["backing"]])
+        fmt = json.loads(out).get("format", "qcow2") if rc == 0 else "qcow2"
+        rc, out, err = sh(["qemu-img", "rebase", "-u", "-F", fmt, "-b", f["backing"], f["upper"]])
+        if rc != 0: return {"ok": False, "name": d["name"], "error": f"rebase of {f['upper']} failed: {err.strip()[:200]}"}
+    d2 = describe(xml, root, mount, names, uuids, nets)
+    bad = [dk for dk in d2["disks"] if dk["status"] != "ok"]
+    if bad: return {"ok": False, "name": d["name"], "error": "disk chain still not complete after rebase"}
+    old = d["oldPrefix"]
+    for dk in root.iter("disk"):
+        s = dk.find("source")
+        if s is None: continue
+        for a in ("file", "dev"):
+            v = s.get(a)
+            if v and old and v.startswith(old + "/"): s.set(a, mount + v[len(old):])
+        for bs in dk.findall("backingStore"): dk.remove(bs)
+    os.makedirs("/var/lib/gfs2-rescue/vms", exist_ok=True)
+    out_xml = f"/var/lib/gfs2-rescue/vms/{d['name']}-{time.strftime('%Y%m%d-%H%M%S')}.xml"
+    tree.write(out_xml, encoding="unicode")
+    rc, out, err = sh(["virsh", "define", out_xml])
+    if rc != 0: return {"ok": False, "name": d["name"], "error": f"virsh define failed: {err.strip()[:300]}"}
+    rc, st, _ = sh(["virsh", "domstate", d["name"]])
+    return {"ok": True, "name": d["name"], "uuid": d["uuid"], "xml": out_xml, "rebased": d["fixable"], "state": st.strip()}
+
+def capacity():
+    mem = 0
+    for ln in open("/proc/meminfo"):
+        if ln.startswith("MemTotal:"): mem = int(ln.split()[1]) // 1024
+    run = {"memMiB": 0, "vcpus": 0, "count": 0}; stop = {"memMiB": 0, "vcpus": 0, "count": 0}
+    rc, out, _ = sh(["virsh", "list", "--all", "--name"])
+    for n in [x.strip() for x in out.splitlines() if x.strip()]:
+        rc, info, _ = sh(["virsh", "dominfo", n])
+        d = {}
+        for ln in info.splitlines():
+            if ":" in ln: k, v = ln.split(":", 1); d[k.strip()] = v.strip()
+        m = int(d.get("Max memory", "0 KiB").split()[0]) // 1024
+        c = int(d.get("CPU(s)", "0") or 0)
+        t = run if d.get("State", "") in ("running", "paused", "in shutdown") else stop
+        t["memMiB"] += m; t["vcpus"] += c; t["count"] += 1
+    nets = {}
+    for n in nets_here():
+        rc, x, _ = sh(["virsh", "net-dumpxml", n])
+        try: nets[n] = sorted({pg.get("name") for pg in ET.fromstring(x).iter("portgroup") if pg.get("name")})
+        except Exception: nets[n] = []
+    return {"ok": True, "memMiB": mem, "cpus": os.cpu_count(), "running": run, "stopped": stop, "networks": nets}
+
+a = sys.argv[1:]
+try:
+    if a and a[0] == "capacity": r = capacity()
+    elif a and a[0] == "scan": r = scan(a[1])
+    elif a and a[0] == "define": r = define(a[1], a[2], "--yes" in a)
+    else: r = {"ok": False, "error": "usage: vms <mountpoint> | define-vm <mountpoint> <xml> --yes"}
+except Exception as e:
+    r = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+print(json.dumps(r))
+PY
+}
+vms()       { local mp=${1:?mountpoint}; vmtool scan "$mp"; }
+capacity()  { vmtool capacity; }
+define_vm() { local mp=${1:?mountpoint} xml=${2:?xml}; shift 2; local y=""; [[ "${1:-}" == --yes ]] && y=--yes; vmtool define "$mp" "$xml" $y; }
+
 case ${1:-} in
   inspect) shift; inspect "$@";;
   collect) shift; collect "$@";;
@@ -336,6 +516,9 @@ case ${1:-} in
   rescan)  shift; rescan "$@";;
   record)  shift; record "$@";;
   restore-sb) shift; restore_sb "$@";;
+  vms)     shift; vms "$@";;
+  define-vm) shift; define_vm "$@";;
+  capacity) shift; capacity "$@";;
   --version) echo "$VERSION";;
-  *) sed -n '2,27p' "$0"; exit 1;;
+  *) sed -n '2,36p' "$0"; exit 1;;
 esac

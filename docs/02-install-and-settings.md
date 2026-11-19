@@ -75,10 +75,25 @@ Administration → Integrations → Plugins → GFS2 Rescue → edit.
 | Setting | What it does | Default |
 | --- | --- | --- |
 | Enable GFS2 Rescue | Shows the tab and allows steps to run. While off, the tab is hidden on every cluster, its script is not loaded into pages, and every request is refused. | Off |
+| Scan when the tab is opened | Off: opening the tab shows the last scan with its time and waits for **Scan now**. On: the tab scans the hosts the first time it is opened. Nothing is scanned while the cluster page loads either way. | Off |
 | API token credential (name or ID) | The Trust credential holding a Morpheus API token. Used only by Attach. | Empty |
 | Appliance API URL | Where Attach sends its API calls. | `https://127.0.0.1` |
 
 Settings are re-read every 15 seconds, so changes take effect without a restart.
+
+### When the tab loads
+
+A scan runs commands on every host of the cluster, so it only happens when asked for:
+
+- Loading a cluster page requests nothing from the plugin. The tab is a small static shell.
+- Opening the tab shows the last scan kept by the appliance, with its time, and a **Scan now**
+  button. The kept scan is in memory, so it is gone after an appliance restart or a plugin upload.
+- With **Scan when the tab is opened** on, the first opening scans by itself. Each user can still
+  tick **Don't auto-load this tab** in the tab header; that choice is kept in the browser.
+- Two people scanning the same cluster at once share one scan.
+
+A kept scan is only a list to look at. Every step checks the whole cluster again on the server
+before it runs.
 
 ### Enable only while you need it
 

@@ -40,6 +40,7 @@ Full documentation is in [`docs/`](docs/README.md):
 - [Troubleshooting](docs/08-troubleshooting.md)
 - [How it works](docs/09-how-it-works.md)
 - [Demo LUN](docs/10-demo-lun.md)
+- [Recover VMs](docs/11-recover-vms.md)
 
 ## Quick start
 

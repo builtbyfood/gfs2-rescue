@@ -132,6 +132,45 @@ class HostRunner {
 
     // ---------------------------------------------------------------- inspect / status / start
 
+    /** vms <mountpoint>: VM definitions on a mounted datastore. Returns [ok, data, error]. */
+    Map vms(def server, String mountpoint) {
+        Map r = exec(server, root(server, "${SCRIPT} vms ${q(mountpoint)}"), 180)
+        return parseJson(r)
+    }
+
+    /** define-vm <mountpoint> <xml> --yes: define one VM on this host. Returns [ok, data, error]. */
+    Map defineVm(def server, String mountpoint, String xml) {
+        Map r = exec(server, root(server, "${SCRIPT} define-vm ${q(mountpoint)} ${q(xml)} --yes"), 300)
+        return parseJson(r)
+    }
+
+    /** capacity: memory, CPUs, what running/stopped VMs reserve, networks. Returns [ok, data, error]. */
+    Map capacity(def server) {
+        Map r = exec(server, root(server, "${SCRIPT} capacity"), 120)
+        return parseJson(r)
+    }
+
+    /** Names and UUIDs of every domain defined on a host. Returns [ok, names, uuids, error]. */
+    Map domains(def server) {
+        Map r = exec(server, root(server, "virsh list --all --name; echo GR-SPLIT; virsh list --all --uuid"), 60)
+        if (!r.ok && !r.out) return [ok: false, error: r.error]
+        def parts = (r.out ?: '').split('GR-SPLIT')
+        def lines = { String t -> (t ?: '').readLines()*.trim().findAll { it } as Set }
+        return [ok: true, names: lines(parts[0]), uuids: lines(parts.length > 1 ? parts[1] : '')]
+    }
+
+    private static Map parseJson(Map r) {
+        String out = (r.out ?: '').trim()
+        int i = out.lastIndexOf('{"ok"')
+        if (i < 0) return [ok: false, error: (r.error ?: out.take(300) ?: 'no output').toString()]
+        try {
+            Map d = new groovy.json.JsonSlurper().parseText(out.substring(i)) as Map
+            return [ok: d.ok == true, data: d, error: d.error]
+        } catch (ex) {
+            return [ok: false, error: "unreadable output: ${ex.message}".toString()]
+        }
+    }
+
     /** inspect --json plus the gfs2-rescue units on this host. Returns [ok, data, units, error]. */
     Map inspect(def server) {
         Map r = exec(server, root(server,

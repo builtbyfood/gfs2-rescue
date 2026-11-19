@@ -5,32 +5,40 @@
 | File | Role |
 | --- | --- |
 | `Gfs2RescuePlugin.groovy` | Entry point: version, settings form, registers the providers and controller |
-| `Settings.groovy` | Reads the plugin settings (cached 15 s). Off unless explicitly on |
-| `Gfs2RescueClusterTabProvider.groovy` | The **GFS2 Storage** cluster tab. Renders an empty shell with the cluster id and name; shown only while enabled |
-| `Gfs2RescueLoaderProvider.groovy` | Global component that loads `gfs2-rescue.js` on every page while enabled (tab HTML loses its `<script>` tags) |
-| `Gfs2RescueController.groovy` | The routes: guard, cluster and host loading, fresh scans, step start, Attach |
+| `Settings.groovy` | Reads the plugin settings (cached 15 s). Off unless explicitly on. The only thing either `show()` waits on |
+| `Gfs2RescueClusterTabProvider.groovy` | The **GFS2 Storage** cluster tab. Renders a static shell (about 1.6 KB) with the cluster id, name and load mode; calls no service; shown only while enabled |
+| `Gfs2RescueLoaderProvider.groovy` | Global component that puts a small inline watcher on every page while enabled (tab HTML loses its `<script>` tags). The watcher loads `gfs2-rescue.js` when the tab is first visible |
+| `Gfs2RescueController.groovy` | The routes: guard, cluster and host loading, scans, step start, Attach |
+| `ScanCache.groovy` | The last scan per cluster and tenant, in memory, and one scan per cluster at a time. No Morpheus types |
 | `Rules.groovy` | Pure logic, no Morpheus types: merging host reports into volumes, duplicate detection, which steps may run and why not |
 | `HostRunner.groovy` | Everything that touches a host: privilege mode, script deployment, inspect, status, start, record, rescan |
 | `MorpheusApi.groovy` | The appliance's REST API for Attach, and the Trust credential lookup |
-| `renderer/hbs/gfs2RescueClusterTab.hbs` | Tab markup and styles (light and dark) |
-| `assets/javascript/gfs2-rescue.js` | The page: scan, tree, work panel, polling, step requests |
+| `renderer/hbs/gfs2RescueClusterTab.hbs` | The tab's static shell |
+| `renderer/hbs/gfs2RescueLoader.hbs` | The inline page watcher |
+| `assets/javascript/gfs2-rescue.js` | The page: styles (light and dark), kept scan, Scan now, tree, work panel, polling, step requests |
 | `scripts/gfs2-rescue.sh` | The host script ([reference](07-host-script.md)) |
 | `tools/gfs2-demo-orphan.sh` | Prepares a scratch LUN for rehearsal ([Demo LUN](10-demo-lun.md)) |
 
 ## Request flow
 
-1. The tab renders a shell with `data-cluster-id`. `gfs2-rescue.js`, loaded on every page by the
-   global component, notices it and starts.
-2. The page POSTs `/plugin/gfs2Rescue/scan`. The controller loads the cluster's hypervisor hosts,
+1. The tab renders a shell with `data-cluster-id` and `data-load-mode`. Loading the cluster page
+   stops there: no request, no host command. The page watcher observes the shell with an
+   `IntersectionObserver`; when the tab is first visible it loads `gfs2-rescue.js` and starts it.
+2. On opening, the page POSTs `/plugin/gfs2Rescue/last`, which returns the kept scan from memory
+   (or says there is none). With **Scan when the tab is opened** on, and unless the user ticked
+   "Don't auto-load this tab", it POSTs `/scan` with `fresh=0` instead, which a kept scan under
+   30 seconds old may answer.
+3. **Scan now** POSTs `/plugin/gfs2Rescue/scan`. If a scan of the same cluster is already running,
+   the request waits for it and gets its result. Otherwise the controller loads the cluster's hypervisor hosts,
    and on each one: works out the privilege mode, makes sure the script is current, runs
    `inspect --json`, and lists active `gfs2-rescue-*` units. `Rules.merge` combines the reports;
    Morpheus datastores of type `libvirt-dir-gfs2` are matched by mount path.
-3. Selecting a volume POSTs `/status` for the chosen host: the current run folder, `state.json`, the
+4. Selecting a volume POSTs `/status` for the chosen host: the current run folder, `state.json`, the
    log tail, and `Rules.allowed` for that volume and host.
-4. A step button POSTs `/start`. The controller scans the whole cluster again, applies
+5. A step button POSTs `/start`. The controller scans the whole cluster again (never from the kept scan), applies
    `Rules.allowed` to the fresh view, validates every parameter, then starts the step on the host
    (or calls the API for Attach).
-5. While a step runs the page polls `/status` every 5 seconds; when it ends, it rescans.
+6. While a step runs the page polls `/status` every 5 seconds; when it ends, it scans fresh.
 
 ## Routes
 
@@ -39,7 +47,8 @@ All POST, all behind the same guard: plugin enabled, `admin-cm` full, core's CSR
 
 | Route | Parameters | Returns |
 | --- | --- | --- |
-| `/plugin/gfs2Rescue/scan` | `clusterId` | Cluster, hosts, volumes, warnings, API credential info |
+| `/plugin/gfs2Rescue/last` | `clusterId` | The kept scan with `cached`, `scannedAt`, `ageMs`, or `none: true`. Runs nothing on a host |
+| `/plugin/gfs2Rescue/scan` | `clusterId`, `fresh` | Cluster, hosts, volumes, warnings, API credential info, `scannedAt`, `scanMs`. `fresh=0` accepts a kept scan under 30 s old |
 | `/plugin/gfs2Rescue/rescan` | `clusterId` | Runs `rescan` on every host, then the same as scan |
 | `/plugin/gfs2Rescue/status` | `clusterId`, `hostId`, `wwid`, `full` | Volume, run folder, state, log (40 lines, or all with `full=1`), allowed steps and reasons |
 | `/plugin/gfs2Rescue/start` | `clusterId`, `hostId`, `wwid`, `step`, and per step `datastoreName`, `snapshot`, `confirm`, `allowUnreadable` | Started run, or the reason it was refused |

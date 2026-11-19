@@ -1,1 +1,68 @@
-<script nonce="{{nonce}}" src="{{asset "/gfs2-rescue.js"}}?v={{version}}"></script>
+<script nonce="{{nonce}}" data-gr-main="{{asset "/gfs2-rescue.js"}}?v={{version}}">
+/* GFS2 Rescue {{version}}: page watcher. Requests nothing. When a GFS2 Storage tab (#gr-root)
+   is first visible, it loads gfs2-rescue.js (with this script's nonce) and starts the tab. */
+(function () {
+  if (window.grShellFind) return;
+  var me = document.currentScript;
+  var MAIN = me ? me.getAttribute('data-gr-main') : null;
+  var NONCE = me ? (me.nonce || me.getAttribute('nonce') || '') : '';
+  var pending = null;
+  window.grNonce = NONCE;
+  function loadMain() {
+    if (typeof window.grInit === 'function') return Promise.resolve();
+    if (pending) return pending;
+    pending = new Promise(function (ok, fail) {
+      if (!MAIN) { fail(new Error('no script address')); return; }
+      var s = document.createElement('script');
+      s.src = MAIN;
+      if (NONCE) s.nonce = NONCE;
+      s.onload = function () { if (typeof window.grInit === 'function') ok(); else fail(new Error('script did not start')); };
+      s.onerror = function () { fail(new Error('script did not load')); };
+      (document.head || document.documentElement).appendChild(s);
+    });
+    pending.catch(function () { pending = null; });
+    return pending;
+  }
+  function open(root) {
+    if (root.dataset.grBound) return;
+    root.dataset.grBound = '1';
+    var st = root.querySelector('#gr-status');
+    if (st) st.textContent = 'Loading...';
+    loadMain().then(function () { window.grInit(root); }, function (e) {
+      root.dataset.grBound = '';
+      if (!st) return;
+      st.textContent = 'The tab did not load (' + e.message + '). ';
+      var b = document.createElement('button');
+      b.type = 'button'; b.textContent = 'Retry';
+      b.onclick = function () { open(root); };
+      st.appendChild(b);
+    });
+  }
+  function watchRoot(root) {
+    if (root.dataset.grWatched) return;
+    root.dataset.grWatched = '1';
+    if ('IntersectionObserver' in window) {
+      var io = new IntersectionObserver(function (es) {
+        for (var i = 0; i < es.length; i++) {
+          if (es[i].isIntersecting) { io.disconnect(); open(root); return; }
+        }
+      }, { rootMargin: '300px' });
+      io.observe(root);
+    } else {
+      var t = setInterval(function () {
+        if (!document.documentElement.contains(root)) { clearInterval(t); return; }
+        if (root.offsetParent !== null) { clearInterval(t); open(root); }
+      }, 500);
+    }
+  }
+  window.grShellFind = function () {
+    var r = document.getElementById('gr-root');
+    if (r) watchRoot(r);
+  };
+  function start() {
+    new MutationObserver(window.grShellFind).observe(document.body, { childList: true, subtree: true });
+    window.grShellFind();
+  }
+  if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
+})();
+</script>

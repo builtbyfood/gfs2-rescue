@@ -12,13 +12,18 @@ import groovy.util.logging.Slf4j
 
 /**
  * Routes (all POST, admin-cm full, core CSRF token + X-GR-Request header, same guard as vm-folders):
- *   /gfs2Rescue/scan    clusterId                       -> hosts + merged GFS2 volumes
+ *   /gfs2Rescue/last    clusterId                       -> the last scan kept in memory; runs nothing on a host
+ *   /gfs2Rescue/scan    clusterId[, fresh]              -> hosts + merged GFS2 volumes (fresh=0: a scan under 30 s old will do)
  *   /gfs2Rescue/status  clusterId, hostId, wwid[, full] -> current run, state.json, log tail, allowed steps
  *   /gfs2Rescue/start   clusterId, hostId, wwid, step[, datastoreName, confirm, snapshot, allowUnreadable]
  *   /gfs2Rescue/rescan  clusterId                       -> SCSI/iSCSI rescan on every host, then scan
  *
  * Every step re-checks the whole cluster (inspect on every host) before it starts, so a volume
  * mounted or locked anywhere in the cluster is refused server-side, whatever the page showed.
+ * The kept scan (ScanCache) only feeds the tab's listing; status, start and Recover VMs never read it.
+ *
+ * Nothing here runs while a cluster page loads: the page calls /last or /scan only once the tab
+ * has been opened (0.1.25). One scan per cluster at a time: a second /scan joins the running one.
  */
 @Slf4j
 class Gfs2RescueController implements PluginController {
@@ -28,6 +33,7 @@ class Gfs2RescueController implements PluginController {
     HostRunner runner
     Settings settings
     MorpheusApi api
+    final ScanCache scans = new ScanCache()
 
     static final String REQ_HEADER = 'X-GR-Request'
 
@@ -51,10 +57,14 @@ class Gfs2RescueController implements PluginController {
     List<Route> getRoutes() {
         Permission perm = Permission.build('admin-cm', 'full')
         return [
+            Route.build('/gfs2Rescue/last',   'last',   perm),
             Route.build('/gfs2Rescue/scan',   'scan',   perm),
             Route.build('/gfs2Rescue/status', 'status', perm),
             Route.build('/gfs2Rescue/start',  'start',  perm),
-            Route.build('/gfs2Rescue/rescan', 'rescan', perm)
+            Route.build('/gfs2Rescue/rescan', 'rescan', perm),
+            Route.build('/gfs2Rescue/vmScan',   'vmScan',   perm),
+            Route.build('/gfs2Rescue/vmDefine', 'vmDefine', perm),
+            Route.build('/gfs2Rescue/vmImport', 'vmImport', perm)
         ]
     }
 
@@ -103,11 +113,27 @@ class Gfs2RescueController implements PluginController {
         return owner?.id == acct.id
     }
 
-    /** The cluster and its hypervisor hosts, tenant-checked. */
-    private Map loadCluster(ViewModel<Map> model, String clusterIdStr) {
+    /** The cluster record alone, tenant-checked. No host list, nothing run on a host. */
+    private Map loadClusterOnly(ViewModel<Map> model, String clusterIdStr) {
         if (!clusterIdStr?.isLong()) return [error: reject(400, 'clusterId required')]
         def cluster = morpheusContext.services.cluster.get(clusterIdStr as Long)
         if (!cluster || !canAccess(model, cluster.owner)) return [error: reject(404, 'cluster not found')]
+        return [cluster: cluster]
+    }
+
+    /**
+     * Kept scans are per cluster and per tenant: a scan result holds the datastore names the
+     * requesting tenant may see, so it is never handed to another tenant.
+     */
+    private static String scanKey(ViewModel<Map> model, def cluster) {
+        return "${cluster.id}:${model?.user?.account?.id}".toString()
+    }
+
+    /** The cluster and its hypervisor hosts, tenant-checked. */
+    private Map loadCluster(ViewModel<Map> model, String clusterIdStr) {
+        Map only = loadClusterOnly(model, clusterIdStr)
+        if (only.error) return only
+        def cluster = only.cluster
         List hosts = []
         try {
             hosts = morpheusContext.services.computeServer.list(new DataQuery(model.user).withFilter('serverGroup.id', cluster.id)).toList()
@@ -199,13 +225,153 @@ class Gfs2RescueController implements PluginController {
         return s
     }
 
+    // ---------------------------------------------------------------- Recover VMs (0.1.23)
+
+    /** The attached volume's mountpoint on a host of this cluster, or a rejection. */
+    private Map recoverTarget(ViewModel<Map> model, Map c) {
+        // hostId optional: without it (scan), the first host with the volume mounted is used,
+        // since every host that mounts the datastore sees the same files
+        String wwid = param(model, 'wwid'), hs = param(model, 'hostId')
+        if (!wwid) return [error: reject(400, 'wwid required')]
+        Map s = freshView(model, c.hosts as List)
+        Map vol = (s.merged.volumes as List).find { it.wwid == wwid }
+        if (!vol) return [error: reject(404, 'volume not seen by this cluster')]
+        if (!vol.datastore) return [error: reject(409, 'attach the volume as a datastore first')]
+        List mounted = (vol.mountedOn as List)
+        if (!mounted) return [error: reject(409, 'the datastore is not mounted on any host')]
+        def m = hs?.isLong() ? mounted.find { it.id == (hs as Long) } : mounted[0]
+        if (!m) return [error: reject(409, 'the volume is not mounted on that host')]
+        def host = (c.hosts as List).find { it.id == m.id }
+        if (!host) return [error: reject(404, 'host not in this cluster')]
+        List mountedHosts = mounted.collect { mm -> (c.hosts as List).find { it.id == mm.id } }.findAll { it }
+        return [host: host, vol: vol, mountpoint: m.mountpoint.toString(), hosts: c.hosts, mountedHosts: mountedHosts]
+    }
+
+    def vmScan(ViewModel<Map> model) {
+        JsonResponse bad = guard(model)
+        if (bad) return bad
+        try {
+            Map c = loadCluster(model, param(model, 'clusterId')); if (c.error) return c.error
+            Map t = recoverTarget(model, c); if (t.error) return t.error
+            Map r = runner.vms(t.host, t.mountpoint as String)
+            if (!r.ok) return reject(500, "scan failed on ${t.host.name}: ${r.error}".toString())
+            Map elsewhereName = [:], elsewhereUuid = [:]
+            (t.hosts as List).findAll { it.id != t.host.id }.each { h ->
+                Map d = runner.domains(h)
+                if (d.ok) {
+                    (d.names as Set).each { n -> elsewhereName[n] = (elsewhereName[n] ?: []) + [h.name?.toString()] }
+                    (d.uuids as Set).each { u -> elsewhereUuid[u] = (elsewhereUuid[u] ?: []) + [h.name?.toString()] }
+                }
+            }
+            List vms = (r.data.vms ?: []) as List
+            vms.each { Map v ->
+                v.elsewhere = ((elsewhereName[v.name] ?: []) + (elsewhereUuid[v.uuid] ?: [])).unique()
+                v.known = null
+                try {
+                    def hit = v.uuid ? morpheusContext.services.computeServer.list(new DataQuery().withFilter('uuid', v.uuid)).toList() : []
+                    if (!hit) hit = morpheusContext.services.computeServer.list(new DataQuery().withFilter('externalId', v.name)).toList()
+                    def k = hit?.find()
+                    if (k) v.known = [id: k.id, name: k.name?.toString()]
+                } catch (ex) { log.debug("GFS2 Rescue: server lookup for ${v.name} failed: ${ex.message}") }
+                v.importable = !(v.problems as List) && !(v.elsewhere as List) && !v.known && !v.definedHere
+            }
+            // capacity of every host that mounts the datastore (each is a possible placement)
+            List hostCaps = (t.mountedHosts as List).collect { h ->
+                Map cap = runner.capacity(h)
+                [id: h.id, name: h.name?.toString(), ok: cap.ok, error: cap.ok ? null : cap.error,
+                 memMiB: cap.data?.memMiB, cpus: cap.data?.cpus, running: cap.data?.running,
+                 stopped: cap.data?.stopped, networks: cap.data?.networks ?: [:]]
+            }
+            List groups = []
+            try { groups = morpheusContext.services.computeSite.list(new DataQuery(model.user)).toList().collect { [id: it.id, name: it.name?.toString()] } }
+            catch (ex) { log.debug("GFS2 Rescue: group list failed: ${ex.message}") }
+            return JsonResponse.of([success: true, host: [id: t.host.id, name: t.host.name?.toString()], mountpoint: t.mountpoint,
+                                    hostCaps: hostCaps,
+                                    vms: vms, skipped: r.data.skipped, networks: r.data.networks, groups: groups,
+                                    batchSize: settings.batchSize(), apiConfigured: settings.apiCredentialId() != null])
+        } catch (Throwable e) {
+            log.error("GFS2 Rescue vmScan failed: ${e.message}", e)
+            return reject(500, e.message)
+        }
+    }
+
+    def vmDefine(ViewModel<Map> model) {
+        JsonResponse bad = guard(model)
+        if (bad) return bad
+        try {
+            Map c = loadCluster(model, param(model, 'clusterId')); if (c.error) return c.error
+            Map t = recoverTarget(model, c); if (t.error) return t.error
+            String xml = param(model, 'xml'), name = param(model, 'name')
+            if (!xml?.startsWith((t.mountpoint as String) + '/') || xml.contains('..')) return reject(400, 'definition must be on this datastore')
+            if (!name) return reject(400, 'name required')
+            def other = (t.hosts as List).findAll { it.id != t.host.id }.find { h -> runner.domains(h).names?.contains(name) }
+            if (other) return reject(409, "${name} is already defined on ${other.name}".toString())
+            Map r = runner.defineVm(t.host, t.mountpoint as String, xml)
+            log.info("GFS2 Rescue: user=${model.user?.username} define-vm ${name} on ${t.host.name} from ${xml}: ${r.ok ? 'defined' : r.error}")
+            if (!r.ok) return reject(409, (r.error ?: 'define failed') as String)
+            return JsonResponse.of([success: true] + (r.data as Map))
+        } catch (Throwable e) {
+            log.error("GFS2 Rescue vmDefine failed: ${e.message}", e)
+            return reject(500, e.message)
+        }
+    }
+
+    def vmImport(ViewModel<Map> model) {
+        JsonResponse bad = guard(model)
+        if (bad) return bad
+        try {
+            Map c = loadCluster(model, param(model, 'clusterId')); if (c.error) return c.error
+            if (!settings.apiCredentialId()) return reject(409, 'set "API token credential ID" in the plugin settings')
+            List<String> names = (param(model, 'names') ?: '').split(',')*.trim().findAll { it } as List<String>
+            if (!names) return reject(400, 'names required')
+            if (names.size() > settings.batchSize()) return reject(400, "at most ${settings.batchSize()} VM(s) per batch (plugin setting)".toString())
+            String gs = param(model, 'groupId')
+            if (!gs?.isLong()) return reject(400, 'groupId required')
+            if (param(model, 'refresh') == '1') {
+                Map rf = api.refresh(c.cluster.id as Long)
+                if (!rf.ok) return reject(502, "cluster refresh failed: ${rf.error}".toString())
+            }
+            Map r = api.importStep(gs as Long, names, param(model, 'environment'))
+            if (!r.ok) return reject(502, (r.error ?: 'import failed') as String)
+            return JsonResponse.of([success: true, vms: r.vms])
+        } catch (Throwable e) {
+            log.error("GFS2 Rescue vmImport failed: ${e.message}", e)
+            return reject(500, e.message)
+        }
+    }
+
     // ---------------------------------------------------------------- routes
 
+    /**
+     * The last scan of this cluster kept in memory, with its time (scannedAt, ageMs), or none: true.
+     * Reads one cluster record; runs nothing on a host. This is what the tab asks for when it is
+     * opened and is not set to scan by itself.
+     */
+    def last(ViewModel<Map> model) {
+        try {
+            def denied = guard(model); if (denied) return denied
+            Map c = loadClusterOnly(model, param(model, 'clusterId')); if (c.error) return c.error
+            Map kept = scans.last(scanKey(model, c.cluster))
+            if (kept) return JsonResponse.of(kept)
+            return JsonResponse.of([success: true, none: true, version: Gfs2RescuePlugin.VERSION,
+                                    cluster: [id: c.cluster.id, name: c.cluster.name?.toString()]])
+        } catch (ex) {
+            log.error("GFS2 Rescue last failed: ${ex.message}", ex)
+            return JsonResponse.of([success: false, error: ex.message])
+        }
+    }
+
+    /**
+     * Scans every host. fresh=0 accepts a kept scan under ScanCache.FRESH_MS old (the tab being
+     * reopened); anything else scans now. A scan of the same cluster already running is joined
+     * instead of starting a second one.
+     */
     def scan(ViewModel<Map> model) {
         try {
             def denied = guard(model); if (denied) return denied
             Map c = loadCluster(model, param(model, 'clusterId')); if (c.error) return c.error
-            return JsonResponse.of(scanResult(model, c, []))
+            long maxAge = param(model, 'fresh') == '0' ? ScanCache.FRESH_MS : 0L
+            return JsonResponse.of(scans.run(scanKey(model, c.cluster), maxAge, true) { scanResult(model, c, []) })
         } catch (ex) {
             log.error("GFS2 Rescue scan failed: ${ex.message}", ex)
             return JsonResponse.of([success: false, error: ex.message])
@@ -217,17 +383,23 @@ class Gfs2RescueController implements PluginController {
         try {
             def denied = guard(model); if (denied) return denied
             Map c = loadCluster(model, param(model, 'clusterId')); if (c.error) return c.error
-            List<String> notes = []
-            (c.hosts as List).each { h ->
-                try {
-                    if (runner.mode(h) == 'none') return
-                    if (!runner.ensureScript(h).ok) return
-                    Map r = runner.rescan(h)
-                    if (!r.ok) notes << "Storage rescan on ${h.name} failed: ${r.error}".toString()
-                } catch (ex) { notes << "Storage rescan on ${h.name} failed: ${ex.message}".toString() }
+            String key = scanKey(model, c.cluster)
+            // one storage rescan per cluster at a time; its scan becomes the kept one
+            Map out = scans.run('rescan:' + key, 0L, false) {
+                List<String> notes = []
+                (c.hosts as List).each { h ->
+                    try {
+                        if (runner.mode(h) == 'none') return
+                        if (!runner.ensureScript(h).ok) return
+                        Map r = runner.rescan(h)
+                        if (!r.ok) notes << "Storage rescan on ${h.name} failed: ${r.error}".toString()
+                    } catch (ex) { notes << "Storage rescan on ${h.name} failed: ${ex.message}".toString() }
+                }
+                log.info("GFS2 Rescue: user=${model.user?.username} storage rescan on cluster ${c.cluster.name} (${(c.hosts as List).size()} hosts)")
+                return scanResult(model, c, notes)
             }
-            log.info("GFS2 Rescue: user=${model.user?.username} storage rescan on cluster ${c.cluster.name} (${(c.hosts as List).size()} hosts)")
-            return JsonResponse.of(scanResult(model, c, notes))
+            scans.put(key, out.findAll { k, v -> !(k in ['cached', 'shared', 'ageMs']) })
+            return JsonResponse.of(out)
         } catch (ex) {
             log.error("GFS2 Rescue rescan failed: ${ex.message}", ex)
             return JsonResponse.of([success: false, error: ex.message])

@@ -33,7 +33,7 @@ DLM lockspace if both were mounted.
 
    ![Last step Re-UUID → ok with the old and new UUID; the copy now badged This cluster, with a warning that it still shares the original's lock table](images/06-duplicate-re-uuid.png)
 
-2. **Rescan.** The Duplicate UUID badges disappear. The copy now shows a warning that it shares its
+2. **Scan now.** The Duplicate UUID badges disappear. The copy now shows a warning that it shares its
    lock table with the original.
 3. **Collect** and **Check** the copy, as in the walkthrough. Collect reuses the Re-UUID run folder,
    so all the evidence stays together. A copy taken while the original was mounted is like a copy

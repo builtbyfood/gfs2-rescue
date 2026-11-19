@@ -10,11 +10,13 @@ import com.morpheusdata.views.ViewModel
 import groovy.util.logging.Slf4j
 
 /**
- * Loads gfs2-rescue.js on every page with a nonced <script> tag.
+ * Puts a small inline, nonced watcher on every page (hbs/gfs2RescueLoader).
  * Tab providers hand their HTML to the UI as trusted HTML, which strips <script> tags
  * (found in the VME migration plugin, May 2026); a GlobalUIComponentProvider's template keeps
- * nonced scripts (vm-folders' VmFoldersNavProvider). The script does nothing until a
- * #gr-root element (the GFS2 Storage tab) appears.
+ * nonced scripts (vm-folders' VmFoldersNavProvider). The watcher waits for a #gr-root element
+ * (the GFS2 Storage tab) to become visible, and only then loads gfs2-rescue.js. Until the tab is
+ * opened a page makes no request for this plugin. show() and renderTemplate() only read the
+ * cached settings.
  */
 @Slf4j
 class Gfs2RescueLoaderProvider extends AbstractGlobalUIComponentProvider {

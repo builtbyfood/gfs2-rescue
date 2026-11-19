@@ -22,6 +22,7 @@ other storage, and never touches a GFS2 volume that is in use.
 | [Troubleshooting](08-troubleshooting.md) | Something is refused, stuck or failed |
 | [How it works](09-how-it-works.md) | You are changing the plugin, or auditing it |
 | [Demo LUN](10-demo-lun.md) | You want to rehearse a takeover on a scratch LUN first |
+| [Recover VMs](11-recover-vms.md) | The datastore is attached and you want its VMs back in the cluster |
 | [Screenshot list](images/SHOTLIST.md) | You are capturing the screenshots for these docs |
 
-Version: this documentation describes plugin 0.1.22 and host script 1.1.
+Version: this documentation describes plugin 0.1.24 and host script 1.3.

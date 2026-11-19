@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.1.25
+- **Nothing runs while a cluster page loads.** Before, the tab's script started as soon as the
+  tab's HTML was in the page, so every cluster detail page ran a scan of every host
+  (`/plugin/gfs2Rescue/scan`, 1.7 s measured) whether or not the tab was opened. Now the page
+  makes no request for this plugin until the GFS2 Storage tab is first visible.
+- **A scan runs only when asked for.** Opening the tab shows the last scan with its time, and
+  **Scan now** (was Rescan) asks the hosts. New setting **Scan when the tab is opened** (off by
+  default) scans on first opening instead; with it on, each user gets a "Don't auto-load this tab"
+  box (kept in the browser).
+- The last scan of each cluster is kept in memory (`/plugin/gfs2Rescue/last` reads it without
+  touching a host), and a scan under 30 seconds old answers a reopened tab. Scan now, Rescan
+  storage and the reloads after a step always scan fresh.
+- **One scan per cluster at a time**: a second request while one is running gets the running
+  scan's result. The same for Rescan storage.
+- Steps are unchanged: status, every step and Recover VMs still check the whole cluster fresh on
+  the server and never read a kept scan.
+- The tab's HTML is a static shell of about 1.6 KB (was 10.3 KB): the styles moved into
+  `gfs2-rescue.js`, which is loaded when the tab is first opened instead of on every Morpheus page.
+  Every page now carries a small inline watcher (about 2.8 KB) and requests nothing.
+- While loading: elapsed seconds. After: "Loaded in N.N s". On failure: the error and **Retry**.
+
+## 0.1.24
+- Recover VMs: **scan once, then place each VM**. The scan no longer asks for a host first: every
+  host that mounts the datastore sees the same files, so it reads them from one. Each selected VM
+  gets its own **Host**, suggested by free memory (biggest VM first; stopped VMs on a host count as
+  reserved, since they may be started), and changeable per VM. **Suggest placement** redoes it for
+  the whole selection.
+- **Host capacity after this batch**: per host, memory and vCPUs reserved by running VMs, stopped
+  VMs, this batch, and the total if all were started, as a percentage of the host's memory. Over
+  90% is a warning, over 100% is flagged; neither blocks the import, because VMs are imported
+  powered off and can be moved or resized before they are started.
+- Networks are checked against each VM's **assigned** host (network and portgroup), as a warning,
+  instead of against the scanning host as a blocking problem.
+- Script v1.3: `capacity` (memory, CPUs, running/stopped reservations, networks and portgroups).
+
+## 0.1.23
+- **Recover VMs** card on an attached, mounted volume (user-driven; nothing changes until you act):
+  - **Scan for VMs** (read-only) on a chosen host: every libvirt definition on the datastore
+    (`mvm-hb/` and VM folders), newest readable copy per VM; name, UUID, vCPU/RAM, MAC addresses,
+    networks, and each disk's chain after rewriting the old cluster's mount (ok / repoint / missing).
+    VMs already defined in the cluster, already known to Morpheus (UUID or name) or with problems
+    are shown but cannot be selected.
+  - **Define & import** in batches of 1-3 (new setting **VM import batch size**, default 1): defines
+    each VM on the chosen host from its original definition (same UUID, MACs, disk serials), repoints
+    stale backing paths (`qemu-img rebase -u`, header only), refreshes the cluster, converts each
+    discovered VM to a managed instance in the chosen group, sets the environment.
+- Script v1.2: `vms <mountpoint>` and `define-vm <mountpoint> <xml> --yes` (JSON out).
+- API helper sends PUT (convert to managed, instance environment); calls proven on 9.1 with
+  hvm-vm-import.py.
+- Docs: [Recover VMs](docs/11-recover-vms.md).
+
 ## 0.1.22
 - Documentation: screenshots redacted. Cluster and DLM names, host names, LUN WWIDs, non-demo
   datastore names, the appliance address and unrelated credentials are covered with solid boxes;
